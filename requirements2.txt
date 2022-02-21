@@ -1,0 +1,6 @@
+-f https://pytorch-geometric.com/whl/torch-1.7.0+cpu.html
+torch-scatter
+torch-sparse
+torch-geometric
+torch-cluster
+torch-spline-conv
