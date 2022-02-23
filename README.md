@@ -2,7 +2,14 @@
 
 If this software was used for academic purposes, please cite our paper with the below information:
 
-`Chuck bibtext info of arxiv submission when done`
+`@misc{turner2022adaptive,
+      title={Adaptive Cut Selection in Mixed-Integer Linear Programming}, 
+      author={Mark Turner and Thorsten Koch and Felipe Serrano and Michael Winkler},
+      year={2022},
+      eprint={2202.10962},
+      archivePrefix={arXiv},
+      primaryClass={math.OC}
+}`
 
 - Install Guide
 
