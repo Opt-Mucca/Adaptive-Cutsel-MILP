@@ -38,7 +38,7 @@ hopefully open.
 One then needs to install PySCIPOpt <https://github.com/scipopt/PySCIPOpt>. I would recommend following the 
 `INSTALL.md` guide. Make sure to have set your environment variable pointing to SCIP! You can test if this has been
 properly installed by running one of the tests, or by trying to import `Model`. This research was done on the branch
-`mt/cut_selector_plugin`, but should be avaiable through default soon.
+`mt/cut_selector_plugin`, but is available from PySCIPOpt version 4.1.0+.
 
 - How to run the software
 
