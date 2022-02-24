@@ -4,4 +4,5 @@ matplotlib==3.3.3
 torch==1.7.0+cpu
 tensorboard==2.5.0
 seaborn==0.11.1
-pyyaml
+pyyaml==5.4.1
+Cython==0.29.27
