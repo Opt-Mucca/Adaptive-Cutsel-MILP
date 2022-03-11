@@ -767,7 +767,7 @@ def run_test_set(data_dir, temp_dir, outfile_dir, neural_network, batch_instance
         for instance in batch_data:
             dir_cut_off = float(np.mean([bd[instance][rand_seed][0]['dir_cut_off'] for rand_seed in rand_seeds]))
             efficacy = float(np.mean([bd[instance][rand_seed][0]['efficacy'] for rand_seed in rand_seeds]))
-            int_support = float(np.mean([bd[instance][rqand_seed][0]['int_support'] for rand_seed in rand_seeds]))
+            int_support = float(np.mean([bd[instance][rand_seed][0]['int_support'] for rand_seed in rand_seeds]))
             obj_parallel = float(np.mean([bd[instance][rand_seed][0]['obj_parallelism'] for rand_seed in rand_seeds]))
             score = float(np.mean([scores[instance][rand_seed][0] for rand_seed in rand_seeds]))
             dual_bound = float(np.mean([dual_bounds[instance][rand_seed][0] for rand_seed in rand_seeds]))
