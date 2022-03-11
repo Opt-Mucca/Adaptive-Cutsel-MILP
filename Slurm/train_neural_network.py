@@ -822,7 +822,6 @@ if __name__ == "__main__":
 
     # The one_at_a_time arg tells us that we want to train a single instance at a time.
     if args.one_at_a_time:
-        quit()
         instance_names = get_instances(args.data_dir)
         for instance_name in instance_names:
             instance_outfile_dir = os.path.join(args.outfile_dir, instance_name)
