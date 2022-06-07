@@ -277,7 +277,7 @@ def save_default_cut_selector_param_npy_file(temp_dir, instance, rand_seed):
     Returns: Nothing, just creates a file
     """
 
-    cut_selector_params = np.array([0.5, 0.6, 0.1, 0.1])
+    cut_selector_params = np.array([0.0, 1.0, 0.1, 0.1])
     file_name = get_filename(temp_dir, instance, rand_seed, trans=True, root=False, sample_i=0, ext='npy')
     np.save(file_name, cut_selector_params)
 
@@ -570,6 +570,9 @@ if __name__ == "__main__":
     remove_temp_files(args.temp_dir)
 
     # Finally we produce YML files containing solve information for our un-restricted solves
-    print('Producing unrestricted solve statistics in YML files', flush=True)
-    instance_names = run_slurm_jobs_get_yml_and_log_files(args.transformed_problem_dir, args.temp_dir, args.outfile_dir,
-                                                          instance_names, random_seeds, False)
+    if False:
+        print('Producing unrestricted solve statistics in YML files', flush=True)
+        instance_names = run_slurm_jobs_get_yml_and_log_files(args.transformed_problem_dir, args.temp_dir,
+                                                              args.outfile_dir, instance_names, random_seeds, False)
+
+    print('Finished!', flush=True)

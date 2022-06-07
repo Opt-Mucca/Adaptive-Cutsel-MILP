@@ -30,7 +30,7 @@ class GNNPolicy(torch.nn.Module):
         super().__init__()
         self.emb_size = 32
         self.n_col_features = 7
-        self.n_row_features = 2
+        self.n_row_features = 7
         self.n_edge_features = 1
         self.n_cutsel_params = 4
 

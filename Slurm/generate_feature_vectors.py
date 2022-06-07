@@ -101,6 +101,9 @@ def ensure_features_are_correct(feature_dict):
             row_i, 'is_at_ub' in row, row['is_at_ub'])
         assert 'dual_sol_val' in row and is_an(row['dual_sol_val']), 'row {}. dual_sol_val key {}, value {}'.format(
             row_i, 'dual_sol_val' in row, row['dual_sol_val'])
+        for ctype in ['linear', 'logicor', 'knapsack', 'setppc', 'varbound']:
+            assert ctype in row and is_bin(row[ctype]), 'row {}. {} key: {}, value {}'.format(
+                row_i, ctype, ctype in row, row[ctype])
 
     # Now we finally do this for the edges of our bipartite graph
     assert 'edges' in feature_dict and type(feature_dict['edges']) == list
@@ -211,6 +214,11 @@ def extract_features_from_dict(feature_dict):
     # different to our original problem constraints as SCIP pre-solved the instance.
     obj_cosines = np.array([feature_dict['rows'][row_i]['obj_cosine'] for row_i in feature_dict['rows']])
     biases = np.array([feature_dict['rows'][row_i]['bias'] for row_i in feature_dict['rows']])
+    linear_cons = np.array([feature_dict['rows'][row_i]['linear'] for row_i in feature_dict['rows']])
+    logicor_cons = np.array([feature_dict['rows'][row_i]['logicor'] for row_i in feature_dict['rows']])
+    knapsack_cons = np.array([feature_dict['rows'][row_i]['knapsack'] for row_i in feature_dict['rows']])
+    setppc_cons = np.array([feature_dict['rows'][row_i]['setppc'] for row_i in feature_dict['rows']])
+    varbound_cons = np.array([feature_dict['rows'][row_i]['varbound'] for row_i in feature_dict['rows']])
 
     '''
     row_at_lbs = np.array([feature_dict['rows'][row_i]['is_at_lb'] for row_i in feature_dict['rows']])
@@ -220,7 +228,8 @@ def extract_features_from_dict(feature_dict):
     '''
 
     # Similar to what we did to the columns, we just need to stack the above arrays into one larger array
-    row_features = np.stack((obj_cosines, biases), axis=-1)
+    row_features = np.stack((obj_cosines, biases, linear_cons, logicor_cons, knapsack_cons, setppc_cons, varbound_cons),
+                            axis=-1)
 
     return edge_indices, coefficients, col_features, row_features
 
@@ -262,6 +271,7 @@ if __name__ == "__main__":
 
     instance_names = list(instance_names)
     print('List of instances are: {}'.format(instance_names), flush=True)
+    print('There are {} may instances'.format(len(instance_names)), flush=True)
 
     # Initialise the random seeds
     random_seeds = [random_seed for random_seed in range(1, args.num_rand_seeds + 1)]

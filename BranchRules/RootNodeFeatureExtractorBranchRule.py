@@ -17,8 +17,7 @@ class RootNodeFeatureExtractor(Branchrule):
 
     def extract_features(self):
         """
-        Function for extracting features from the pyscipopt model. This needs to be called after solving the
-        probing LP as we need the current LP information.
+        Function for extracting features from the pyscipopt model.
         Features used are a subset of those found in:
         Exact Combinatorial Optimization with Graph Convolutional Neural Networks (Gasse et.al)
         We use a subset of features as we are only interested in the root-node LP relaxation, so do not want any
@@ -67,6 +66,7 @@ class RootNodeFeatureExtractor(Branchrule):
             self.features['cols'][col_i]['sol_val'] = (solval - lb) / (ub - lb + 1e-8)
 
             # Get the variable type
+            assert var.vtype() in ['BINARY', 'INTEGER', 'CONTINUOUS', 'IMPLINT']
             for vtype in ['BINARY', 'INTEGER', 'CONTINUOUS', 'IMPLINT']:
                 if var.vtype() == vtype:
                     self.features['cols'][col_i][vtype] = 1
@@ -88,6 +88,7 @@ class RootNodeFeatureExtractor(Branchrule):
             ubs.append(ub if not self.model.isInfinity(abs(ub)) else 0)
 
             # Get the basis status of the column in the LP
+            assert cols[i].getBasisStatus() in ['lower', 'basic', 'upper', 'zero']
             for btype in ['lower', 'basic', 'upper', 'zero']:
                 if cols[i].getBasisStatus() == btype:
                     self.features['cols'][col_i][btype] = 1
@@ -111,46 +112,58 @@ class RootNodeFeatureExtractor(Branchrule):
             print('All variables have reduced cost 0')
             red_cost_norm = 1
         assert red_cost_norm > 0, 'All variables are in the basis'
-        if red_cost_norm > 0:
-            for col_i in self.features['cols']:
-                self.features['cols'][col_i]['red_cost'] = self.features['cols'][col_i]['red_cost'] / red_cost_norm
+        for col_i in self.features['cols']:
+            self.features['cols'][col_i]['red_cost'] = self.features['cols'][col_i]['red_cost'] / red_cost_norm
 
+        # Normalise the objective coefficients
         obj_coeff_norm = float(np.linalg.norm(obj_coefficients))
         assert obj_coeff_norm > 0, 'Problem is a feasibility problem, as all coefficients are 0 in the objective!'
-        if obj_coeff_norm > 0:
-            for col_i in self.features['cols']:
-                self.features['cols'][col_i]['obj_coeff'] = self.features['cols'][col_i]['obj_coeff'] / obj_coeff_norm
+        for col_i in self.features['cols']:
+            self.features['cols'][col_i]['obj_coeff'] = self.features['cols'][col_i]['obj_coeff'] / obj_coeff_norm
 
         # We normalise the LB and UB values. -2 represents an infinite LB and +2 an infinite UB
-        lb_norm = float(np.linalg.norm(lbs))
-        ub_norm = float(np.linalg.norm(ubs))
+        # We normalise the bounds using the infinity norm as opposed to the two norm here.
+        bound_norm_type = np.inf
+        # bound_norm_type = None
+        lb_norm = float(np.linalg.norm(lbs, ord=bound_norm_type))
+        ub_norm = float(np.linalg.norm(ubs, ord=bound_norm_type))
+        if lb_norm == 0:
+            lb_norm = 1
+        if ub_norm == 0:
+            ub_norm = 1
         for col_i in self.features['cols']:
             if self.features['cols'][col_i]['has_lb'] is None:
                 self.features['cols'][col_i]['has_lb'] = -2
             else:
-                self.features['cols'][col_i]['has_lb'] = self.features['cols'][col_i]['has_lb'] / (1 + lb_norm)
+                self.features['cols'][col_i]['has_lb'] = self.features['cols'][col_i]['has_lb'] / lb_norm
                 assert -1 <= self.features['cols'][col_i]['has_lb'] <= 1
         for col_i in self.features['cols']:
             if self.features['cols'][col_i]['has_ub'] is None:
                 self.features['cols'][col_i]['has_ub'] = 2
             else:
-                self.features['cols'][col_i]['has_ub'] = self.features['cols'][col_i]['has_ub'] / (1 + ub_norm)
+                self.features['cols'][col_i]['has_ub'] = self.features['cols'][col_i]['has_ub'] / ub_norm
                 assert -1 <= self.features['cols'][col_i]['has_ub'] <= 1
 
         # We now cycle through the constraints
         rows = self.model.getLPRowsData()
         nrows = self.model.getNLPRows()
 
-        # Initialise a dual_sol_val list so we can normalise our results later
+        # Initialise lists that contain information on each row. Ranged rows will be manually split into two rows
         dual_sol_vals = []
-        row_biases = []
-        is_ranged_rows = []
-        is_lhs_rows = []
+        row_rhss = []
+        row_lhss = []
+        is_ranged_row = []
+        is_lhs_row = []
         row_norms = []
 
+        # As our bipartite graph representation is identical when the columns and rows are permuted, we do not need
+        # to keep track of the LPPos. Doing so is possible, but makes adding ranged rows difficult and changes
+        # the structure anyway. So we simply ignore this.
         for i in range(nrows):
-            # Gets position of row in current LP, or -1 if it is not in LP
-            row_i = rows[i].getLPPos()
+
+            # Get the actual row_i index that has been changed to accommodate ranged rows
+            row_i = i + sum(is_ranged_row)
+            # Initialise the dictionary for the row
             self.features['rows'][row_i] = {}
 
             # Get the norm of the row
@@ -163,45 +176,93 @@ class RootNodeFeatureExtractor(Branchrule):
             cst = rows[i].getConstant()
             activity = self.model.getRowLPActivity(rows[i])
 
-            assert not self.model.isInfinity(cst)
+            assert not self.model.isInfinity(abs(cst))
 
-            # Get the objective parallelism
-            self.features['rows'][row_i]['obj_cosine'] = self.model.getRowObjParallelism(rows[i])
-
-            # Get the bias of the row
-            lhss = (lhs - cst) if not self.model.isInfinity(lhs) else 0
-            rhss = (rhs - cst) if not self.model.isInfinity(rhs) else 0
-            if not self.model.isInfinity(lhs) and not self.model.isInfinity(rhs):
-                is_ranged_rows.append(True)
-                is_lhs_rows.append(False)
-                row_biases.append(rhss)
+            # Get the rhs / lhs of the row. We manually transform all rows into single rhs rows
+            lhss = (lhs - cst) if not self.model.isInfinity(abs(lhs)) else 0
+            rhss = (rhs - cst) if not self.model.isInfinity(abs(rhs)) else 0
+            # Handle ranged rows as two rhs constraints. The first is the normal rhs, and the next is the flipped lhs
+            if not self.model.isInfinity(abs(lhs)) and not self.model.isInfinity(abs(rhs)):
+                self.features['rows'][row_i + 1] = {}
+                is_ranged_row.append(True)
+                is_lhs_row.append(False)
+                row_rhss.append(rhss)
+                row_lhss.append(lhss)
             else:
-                is_ranged_rows.append(False)
-                if not self.model.isInfinity(lhs):
-                    is_lhs_rows.append(True)
-                    row_biases.append(-1 * lhss)
+                is_ranged_row.append(False)
+                if not self.model.isInfinity(abs(lhs)):
+                    is_lhs_row.append(True)
+                    row_rhss.append(-1 * lhss)
+                    row_lhss.append(None)
                 else:
-                    is_lhs_rows.append(False)
-                    row_biases.append(rhss)
+                    is_lhs_row.append(False)
+                    row_rhss.append(rhss)
+                    row_lhss.append(None)
 
             # Sign here is irrelevant as it is only used for norm calculations of the bias
             row_non_zeros = rows[i].getVals()
-            if is_ranged_rows[-1]:
-                # In Gurobi, ranged rows are treated as equality constraints, with a new slack variable being added.
-                # This slack variable has bounds [0, rhs - lhs].
-                row_non_zeros.append(1)
-            row_non_zeros.append(row_biases[-1])
-            row_norms.append(float(np.linalg.norm(row_non_zeros)))
-            assert row_norms[-1] > 0, 'Row has all zero coefficients and bias!'
-            self.features['rows'][row_i]['bias'] = row_biases[-1] / row_norms[-1]
+            if is_ranged_row[-1]:
+                row_norms.append(float(np.linalg.norm(row_non_zeros + [row_rhss[-1]])))
+                row_norms.append(float(np.linalg.norm(row_non_zeros + [row_lhss[-1]])))
+            else:
+                assert row_lhss[-1] is None
+                if row_rhss[-1] is not None:
+                    row_non_zeros.append(row_rhss[-1])
+                row_norms.append(float(np.linalg.norm(row_non_zeros)))
 
-            # Get whether the row is tight at it's LB or UB
-            self.features['rows'][row_i]['is_at_lb'] = 1 if self.model.isEQ(activity, lhs) else 0
-            self.features['rows'][row_i]['is_at_ub'] = 1 if self.model.isEQ(activity, rhs) else 0
+            # Make sure that the norms are strictly greater than zero
+            assert row_norms[-1] > 0, 'Row has all zero coefficients and bias!'
+            if is_ranged_row[-1]:
+                assert row_norms[-2] > 0, 'Row has all zero coefficients and bias!'
+
+            if is_ranged_row[-1]:
+                assert row_rhss[-1] is not None and row_lhss[-1] is not None
+                self.features['rows'][row_i]['bias'] = row_rhss[-1] / row_norms[-2]
+                self.features['rows'][row_i + 1]['bias'] = row_lhss[-1] / row_norms[-1]
+            else:
+                assert row_rhss[-1] is not None
+                self.features['rows'][row_i]['bias'] = row_rhss[-1] / row_norms[-1]
+
+            # Get the objective parallelism
+            self.features['rows'][row_i]['obj_cosine'] = self.model.getRowObjParallelism(rows[i])
+            if is_ranged_row[-1]:
+                # As the parallelism measure takes an absolute value, the values are the same for the rhs and lhs row
+                self.features['rows'][row_i + 1]['obj_cosine'] = self.model.getRowObjParallelism(rows[i])
+
+            # Get whether the row is tight at its LB or UB
+            if is_ranged_row[-1]:
+                # The only way a converted ranged row is tight at both the ub and lb is if lhs and rhs are equal
+                self.features['rows'][row_i]['is_at_lb'] = 1 if lhs == rhs else 0
+                self.features['rows'][row_i]['is_at_ub'] = 1 if self.model.isEQ(activity, rhs) else 0
+                self.features['rows'][row_i + 1]['is_at_lb'] = 1 if self.model.isEQ(activity, lhs) else 0
+                self.features['rows'][row_i + 1]['is_at_ub'] = 1 if lhs == rhs else 0
+            else:
+                self.features['rows'][row_i]['is_at_lb'] = 1 if self.model.isEQ(activity, lhs) else 0
+                self.features['rows'][row_i]['is_at_ub'] = 1 if self.model.isEQ(activity, rhs) else 0
 
             # Get the dual solution value of the row in the LP. Note that this non-normalised
             self.features['rows'][row_i]['dual_sol_val'] = self.model.getRowDualSol(rows[i])
+            if is_ranged_row[-1]:
+                # For the flipped lhs of ranged rows we simply take the same dual value
+                self.features['rows'][row_i + 1]['dual_sol_val'] = self.model.getRowDualSol(rows[i])
             dual_sol_vals.append(self.features['rows'][row_i]['dual_sol_val'])
+            if is_ranged_row[-1]:
+                dual_sol_vals.append(self.features['rows'][row_i + 1]['dual_sol_val'])
+
+            # Get the constraint handler responsible for the row
+            cons_type_row = rows[i].getConsOriginConshdlrtype()
+            # Note that our experiments only handled linear, logicor, knapsack, setppc, and varbound constraints
+            # This can be extended quite easily, but shouldn't if none of those constraint type exist over the instances
+            assert cons_type_row in ['linear', 'logicor', 'knapsack', 'setppc', 'varbound']
+            for cons_type in ['linear', 'logicor', 'knapsack', 'setppc', 'varbound']:
+                if rows[i].getConsOriginConshdlrtype() == cons_type:
+                    self.features['rows'][row_i][cons_type] = 1
+                    if is_ranged_row[-1]:
+                        self.features['rows'][row_i + 1][cons_type] = 1
+                else:
+                    self.features['rows'][row_i][cons_type] = 0
+                    if is_ranged_row[-1]:
+                        self.features['rows'][row_i + 1][cons_type] = 0
 
         # Normalise the dual solution values
         dual_sol_norm = float(np.linalg.norm(dual_sol_vals))
@@ -209,9 +270,8 @@ class RootNodeFeatureExtractor(Branchrule):
             for row_i in self.features['rows']:
                 self.features['rows'][row_i]['dual_sol_val'] = self.features['rows'][row_i]['dual_sol_val'] / \
                                                                dual_sol_norm
-        assert len(is_ranged_rows) == nrows
-        assert len(is_lhs_rows) == nrows
-        assert len(row_norms) == nrows
+        assert len(is_ranged_row) == nrows
+        assert len(is_lhs_row) == nrows
 
         # Now construct bipartite graph representation of the LP relaxation
         # We say LP relaxation here as SCIP internally can store our problem differently than the LP's state
@@ -220,19 +280,31 @@ class RootNodeFeatureExtractor(Branchrule):
         # Initialise the edge list and coefficient list
         self.features['edges'] = []
         self.features['coefficients'] = []
+        # Keep a separate counter for the row_i index used in our dictionary
+        row_i = 0
         for i in range(nrows):
             # Get the index of the row and all coefficients and columns with non-zero entries
-            row_i = rows[i].getLPPos()
             row_cols = rows[i].getCols()
             row_vals = rows[i].getVals()
             # If we have a LHS constraint, we multiple the result by -1 to make a RHS constraint
-            if is_lhs_rows[i]:
+            if is_lhs_row[i]:
+                assert not is_ranged_row[i]
                 row_vals = [-1 * row_val for row_val in row_vals]
             assert len(row_cols) == len(row_vals)
             # Cycle over the column and add the edge to our graph along with the corresponding coefficient
             for j, col in enumerate(row_cols):
                 self.features['edges'].append([col.getLPPos(), row_i])
-                self.features['coefficients'].append(row_vals[j] / row_norms[i])
+                self.features['coefficients'].append(row_vals[j] / row_norms[row_i])
+            # Increment the row_i counter
+            row_i += 1
+            # If it is a ranged row, add the flipped lhs constraint
+            if is_ranged_row[i]:
+                row_vals = [-1 * row_val for row_val in row_vals]
+                # Cycle over the column and add the edge to our graph along with the corresponding coefficient
+                for j, col in enumerate(row_cols):
+                    self.features['edges'].append([col.getLPPos(), row_i])
+                    self.features['coefficients'].append(row_vals[j] / row_norms[row_i])
+                row_i += 1
 
         return
 
@@ -243,16 +315,14 @@ class RootNodeFeatureExtractor(Branchrule):
             quit()
         assert allowaddcons
 
+        # Assert that the model is not doing anything funny
         assert not self.model.inRepropagation()
         assert not self.model.inProbing()
-        self.model.startProbing()
-        assert not self.model.isObjChangedProbing()
-        self.model.constructLP()
-        self.model.solveProbingLP()
 
+        # Extract the features of the model()
         self.extract_features()
 
-        self.model.endProbing()
+        # Interrupt the solve. We only wanted features from this, we never wanted to actually branch.
         self.model.interruptSolve()
 
         # Make a dummy child. This branch rule should only be used at the root node!

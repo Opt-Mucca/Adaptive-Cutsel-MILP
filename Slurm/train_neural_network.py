@@ -59,7 +59,7 @@ def train_network(data_dir, run_dir, temp_dir, prev_network, outfile_dir, num_ep
         neural_network.load_state_dict(torch.load(prev_network))
 
     # Initialise the optimizer we use to wrap our neural_network with
-    optimiser = torch.optim.Adam(neural_network.parameters(), lr=0.00001)
+    optimiser = torch.optim.Adam(neural_network.parameters(), lr=0.00005)
 
     # Get the instance paths and names from the data directory
     instances = get_instances(data_dir)
@@ -101,8 +101,15 @@ def train_network(data_dir, run_dir, temp_dir, prev_network, outfile_dir, num_ep
                                                                                                   num_samples)
 
             # Create a new sub-directory in the slurm outfile directory to contain logs from this batch
-            batch_outfile_dir = os.path.join(outfile_dir, str(run_i))
-            os.mkdir(batch_outfile_dir)
+            if single_instance is not None:
+                batch_outfile_dir = os.path.join(outfile_dir, str(run_i))
+                os.mkdir(batch_outfile_dir)
+            else:
+                epoch_outfile_dir = os.path.join(outfile_dir, str(epoch_i))
+                if not os.path.isdir(epoch_outfile_dir):
+                    os.mkdir(epoch_outfile_dir)
+                batch_outfile_dir = os.path.join(epoch_outfile_dir, str(run_i))
+                os.mkdir(batch_outfile_dir)
 
             # Create slurm jobs. Each job consists of one instance, one seed, and a sampled cut-sel param set
             signal_file = submit_slurm_jobs(data_dir, temp_dir, batch_outfile_dir, num_samples,
@@ -141,9 +148,14 @@ def train_network(data_dir, run_dir, temp_dir, prev_network, outfile_dir, num_ep
 
         if single_instance is None:
             torch.save(neural_network.state_dict(), os.path.join(data_dir, 'actor_{}.pt'.format(epoch_i)))
+            print('Completed Epoch {}'.format(epoch_i), flush=True)
 
     if single_instance is not None:
         torch.save(neural_network.state_dict(), os.path.join(data_dir, single_instance + '.pt'))
+        remove_temp_files(temp_dir)
+        _, tensorboard_writer = run_test_set(data_dir, temp_dir, outfile_dir, neural_network, instances, rand_seeds,
+                                             standard_solve_data, test_i, 4, 5, tensorboard_writer,
+                                             create_yaml=single_instance is not None)
 
     return
 
@@ -484,11 +496,8 @@ def generate_batches(instances, rel_batch_size, random_state):
     num_batches = round(1 / rel_batch_size)
     if len(instances) < num_batches:
         logging.error('rel_batch_size {} results in {} many batches when there are only {} many instances.'
-                      'Please choose a larger rel_batch_size'.format(rel_batch_size, num_batches, len(instances)))
-        quit()
-    if num_batches < 1:
-        logging.error('rel_batch_size {} is too small and batch_size would be 0. Changed to 1.'.format(rel_batch_size))
-        num_batches = 1
+                      'Changed to {} many batches'.format(rel_batch_size, num_batches, len(instances), len(instances)))
+        num_batches = len(instances)
 
     # Shuffle the instances in the same way as our RandomState. This way we do not always get the same batches
     if random_state is not None:
@@ -775,7 +784,12 @@ def run_test_set(data_dir, temp_dir, outfile_dir, neural_network, batch_instance
             num_cut = float(np.mean([num_cuts[instance][rand_seed][0] for rand_seed in rand_seeds]))
             sol_frac = float(np.mean([sol_fracs[instance][rand_seed][0] for rand_seed in rand_seeds]))
             gap = float(np.mean([gaps[instance][rand_seed][0] for rand_seed in rand_seeds]))
-            parameters = [[dir_cut_off, efficacy, int_support, obj_parallel]]
+            parameters = []
+            for rand_seed in rand_seeds:
+                parameters.append([bd[instance][rand_seed][0]['dir_cut_off'],
+                                   bd[instance][rand_seed][0]['efficacy'],
+                                   bd[instance][rand_seed][0]['int_support'],
+                                   bd[instance][rand_seed][0]['obj_parallelism']])
             yaml_data = {instance: {'dir_cut_off': dir_cut_off, 'efficacy': efficacy, 'int_support': int_support,
                                     'obj_parallelism': obj_parallel, 'score': score, 'dual_bound': dual_bound,
                                     'gap': gap, 'num_lp_iterations': lp_iter, 'num_cuts': num_cut,
@@ -813,7 +827,6 @@ if __name__ == "__main__":
         if not os.path.isdir(args.outfile_dir):
             os.mkdir(args.outfile_dir)
         else:
-            quit()
             remove_slurm_files(args.outfile_dir)
 
     if args.prev_network == 'None':

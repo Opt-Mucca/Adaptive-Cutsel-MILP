@@ -14,7 +14,7 @@ import parameters
 
 def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation, separators, heuristics,
                      aggressive_sep, dummy_branch_rule, time_limit=None, sol_path=None,
-                     dir_cut_off=0.5, efficacy=0.6, int_support=0.1, obj_parallelism=0.1):
+                     dir_cut_off=0.0, efficacy=1.0, int_support=0.1, obj_parallelism=0.1):
     """
     General function to construct a PySCIPOpt model.
 
@@ -45,10 +45,8 @@ def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation,
     assert all([type(param) == bool for param in [pre_solve, propagation, separators, heuristics, aggressive_sep]])
 
     scip = Model()
-    scip.setParam("limits/nodes", node_lim)
-    scip.setParam("randomization/permutevars", True)
-    scip.setParam("randomization/permutationseed", rand_seed)
-    scip.setParam("randomization/randomseedshift", rand_seed)
+    scip.setParam('limits/nodes', node_lim)
+    scip.setParam('randomization/randomseedshift', rand_seed)
     if not pre_solve:
         # Printing the transformed MPS files keeps the fixed variables and this drastically changes the solve
         # functionality after reading in the model and re-solving. So set one round of pre-solve to remove these
@@ -76,19 +74,20 @@ def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation,
         scip.includeCutsel(cut_selector, 'FixedAmountCutSel', 'Tries to add the same number of cuts per round',
                            1000000)
         # Set the separator parameters
-        scip.setParam("separating/maxstallroundsroot", num_rounds)
+        scip.setParam('separating/maxstallroundsroot', num_rounds)
         scip = set_scip_separator_params(scip, num_rounds, -1, cuts_per_round, cuts_per_round, 0)
     else:
-        scip = set_scip_separator_params(scip, -1, -1, 5000, 100, 10)
+        # scip = set_scip_separator_params(scip, -1, -1, 5000, 100, 10)
         scip = set_scip_cut_selector_params(scip, dir_cut_off, efficacy, int_support, obj_parallelism)
     if not heuristics:
         scip.setHeuristics(SCIP_PARAMSETTING.OFF)
     if dummy_branch_rule:
-        scip.setParam("branching/leastinf/priority", 10000000)
+        scip.setParam('branching/leastinf/priority', 10000000)
     if time_limit is not None:
-        scip.setParam("limits/time", time_limit)
+        scip.setParam('limits/time', time_limit)
 
-    scip.setParam("misc/usesymmetry", 0)
+    # We do not want oribtope constraints as they're difficult to represent in the bipartite graph
+    scip.setParam('misc/usesymmetry', 0)
 
     # read in the problem
     scip.readProblem(instance_path)
@@ -147,8 +146,8 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/aggregation/freq', frequency)
     scip.setParam('separating/aggregation/maxrounds', max_rounds)
     scip.setParam('separating/aggregation/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/aggregation/maxsepacuts', max_cuts)
-    scip.setParam('separating/aggregation/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/aggregation/maxsepacuts', 10000)
+    scip.setParam('separating/aggregation/maxsepacutsroot', 10000)
 
     # Now the Chvatal-Gomory w/ MIP separator
     # scip.setParam('separating/cgmip/freq', frequency)
@@ -157,7 +156,7 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
 
     # The clique separator
     scip.setParam('separating/clique/freq', frequency)
-    scip.setParam('separating/clique/maxsepacuts', max_cuts)
+    scip.setParam('separating/clique/maxsepacuts', 10000)
 
     # The close-cuts separator
     scip.setParam('separating/closecuts/freq', frequency)
@@ -173,16 +172,16 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/disjunctive/freq', frequency)
     scip.setParam('separating/disjunctive/maxrounds', max_rounds)
     scip.setParam('separating/disjunctive/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/disjunctive/maxinvcuts', max_cuts)
-    scip.setParam('separating/disjunctive/maxinvcutsroot', max_cuts_root)
+    scip.setParam('separating/disjunctive/maxinvcuts', 10000)
+    scip.setParam('separating/disjunctive/maxinvcutsroot', 10000)
     scip.setParam('separating/disjunctive/maxdepth', -1)
 
     # The separator for edge-concave function
     scip.setParam('separating/eccuts/freq', frequency)
     scip.setParam('separating/eccuts/maxrounds', max_rounds)
     scip.setParam('separating/eccuts/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/eccuts/maxsepacuts', max_cuts)
-    scip.setParam('separating/eccuts/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/eccuts/maxsepacuts', 10000)
+    scip.setParam('separating/eccuts/maxsepacutsroot', 10000)
     scip.setParam('separating/eccuts/maxdepth', -1)
 
     # The flow cover cut separator
@@ -195,8 +194,8 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/gomory/freq', frequency)
     scip.setParam('separating/gomory/maxrounds', max_rounds)
     scip.setParam('separating/gomory/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/gomory/maxsepacuts', max_cuts)
-    scip.setParam('separating/gomory/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/gomory/maxsepacuts', 10000)
+    scip.setParam('separating/gomory/maxsepacutsroot', 10000)
 
     # The implied bounds separator
     scip.setParam('separating/impliedbounds/freq', frequency)
@@ -209,33 +208,35 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
 
     # The multi-commodity-flow network cut separator
     scip.setParam('separating/mcf/freq', frequency)
-    scip.setParam('separating/mcf/maxsepacuts', max_cuts)
-    scip.setParam('separating/mcf/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/mcf/maxsepacuts', 10000)
+    scip.setParam('separating/mcf/maxsepacutsroot', 10000)
 
     # The odd cycle separator
     scip.setParam('separating/oddcycle/freq', frequency)
     scip.setParam('separating/oddcycle/maxrounds', max_rounds)
     scip.setParam('separating/oddcycle/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/oddcycle/maxsepacuts', max_cuts)
-    scip.setParam('separating/oddcycle/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/oddcycle/maxsepacuts', 10000)
+    scip.setParam('separating/oddcycle/maxsepacutsroot', 10000)
 
     # The rapid learning separator
     scip.setParam('separating/rapidlearning/freq', frequency)
 
     # The strong CG separator
     scip.setParam('separating/strongcg/freq', frequency)
-    scip.setParam('separating/strongcg/maxrounds', max_rounds)
-    scip.setParam('separating/strongcg/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/strongcg/maxsepacuts', max_cuts)
-    scip.setParam('separating/strongcg/maxsepacutsroot', max_cuts_root)
 
     # The zero-half separator
     scip.setParam('separating/zerohalf/freq', frequency)
-    scip.setParam('separating/zerohalf/maxcutcands', max(max_cuts, max_cuts_root))
+    scip.setParam('separating/zerohalf/maxcutcands', 100000)
     scip.setParam('separating/zerohalf/maxrounds', max_rounds)
     scip.setParam('separating/zerohalf/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/zerohalf/maxsepacuts', max_cuts)
-    scip.setParam('separating/zerohalf/maxsepacutsroot', max_cuts_root)
+    scip.setParam('separating/zerohalf/maxsepacuts', 10000)
+    scip.setParam('separating/zerohalf/maxsepacutsroot', 10000)
+
+    # The rlt separator
+    scip.setParam('separating/rlt/freq', frequency)
+    scip.setParam('separating/rlt/maxncuts', 10000)
+    scip.setParam('separating/rlt/maxrounds', max_rounds)
+    scip.setParam('separating/rlt/maxroundsroot', max_rounds_root)
 
     # Now the general cut and round parameters
     scip.setParam("separating/maxroundsroot", max_rounds_root)
@@ -461,9 +462,6 @@ def run_python_slurm_job(python_file, job_name, outfile, time_limit, arg_list, d
              outfile,
              '--error',
              outfile,
-             '-A',
-             'gas',
-             '--exclude=optc-04-04',
              '{}'.format(python_file)]
 
     cmd = cmd_1 + cmd_2 + cmd_3

@@ -139,6 +139,7 @@ def solve_model_and_extract_solve_info(scip, dir_cut_off, efficacy, int_support,
     with open(stat_file) as s:
         stats = s.readlines()
     # TODO: Make this safer to access.
+    assert 'primal-dual' in stats[-3]
     data['primal_dual_integral'] = float(stats[-3].split(':')[1].split('     ')[1])
     if not print_stats:
         os.remove(stat_file)

@@ -6,7 +6,7 @@ import random
 class FixedAmountCutsel(Cutsel):
 
     def __init__(self, num_cuts_per_round=20, min_orthogonality_root=0.9,
-                 min_orthogonality=0.9, dir_cutoff_dist_weight=0.5, efficacy_weight=0.6, int_support_weight=0.1,
+                 min_orthogonality=0.9, dir_cutoff_dist_weight=0.0, efficacy_weight=1.0, int_support_weight=0.1,
                  obj_parallel_weight=0.1):
         super().__init__()
         self.num_cuts_per_round = num_cuts_per_round
@@ -16,6 +16,7 @@ class FixedAmountCutsel(Cutsel):
         self.int_support_weight = int_support_weight
         self.obj_parallel_weight = obj_parallel_weight
         self.efficacy_weight = efficacy_weight
+        random.seed(42)
 
     def cutselselect(self, cuts, forcedcuts, root, maxnselectedcuts):
         """
@@ -100,7 +101,6 @@ class FixedAmountCutsel(Cutsel):
         # initialise the scoring of each cut as well as the max_score
         scores = [0] * len(cuts)
         max_score = 0.0
-        random.seed(42)
 
         # We require this check as getBestSol() may return the lp solution, which is not a valid primal solution
         sol = self.model.getBestSol() if self.model.getNSols() > 0 else None
@@ -165,7 +165,7 @@ class FixedAmountCutsel(Cutsel):
         @rtype: int, list of pyscipopt rows, list of pyscipopt rows
         """
         # Go backwards through the still viable cuts.
-        for i in range(nselectedcuts + n_cuts - 1, nselectedcuts, -1):
+        for i in range(nselectedcuts + n_cuts - 1, nselectedcuts - 1, -1):
             cut_parallel = self.model.getRowParallelism(cut, cuts[i])
             # The maximum allowed parallelism depends on the whether the cut is 'good'
             allowed_parallel = good_max_parallel if scores[i] >= good_score else max_parallel
