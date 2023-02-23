@@ -5,18 +5,21 @@ import yaml
 from utilities import build_scip_model, str_to_bool, read_cut_selector_param_file, get_filename, is_dir, is_file
 
 
-def run_instance(temp_dir, instance_path, instance, rand_seed, sample_i, time_limit, root, print_sol, print_stats):
+def run_instance(temp_dir, instance_path, solution_path, instance, rand_seed, sample_i, time_limit, root, fixed_cutsel,
+                 print_sol, print_stats):
     """
     The call to solve a single instance, where these runs will be done on slurm. The function loads the correct
     cut-selector parameters and then solves the appropriate SCIP instance.
     Args:
         temp_dir: The directory in which all temporary files per batch will be dumped then deleted (e.g. cut-sel params)
-        instance_path: The path to the MIP .mps instance
+        instance_path: The path to the MILP .mps instance
+        solution_path: The path to the MILP .sol file (or None)
         instance: The instance base name of the MIP file
         rand_seed: The random seed which will be used to shift all SCIP randomisation
         sample_i: The sample index so we can load the sampled cut-sel param YAML file
         time_limit: The time limit, if it exists for our SCIP instance. Negative time_limit means None
         root: A boolean for whether we should restrict our solve to the root node or not
+        fixed_cutsel: A boolean for whether we should use the fixed cutsel (playground environment) for this run
         print_sol: Whether the .sol file from the run should be printed or not
         print_stats: Whether the .stats file from the run should be printed or not
 
@@ -35,20 +38,14 @@ def run_instance(temp_dir, instance_path, instance, rand_seed, sample_i, time_li
     # Build the initial SCIP model for the instance
     time_limit = None if time_limit < 0 else time_limit
     node_lim = 1 if root else -1
-    propagation = False if root else True
-    heuristics = False if root else True
-    aggressive = True if root else False
+    propagation = False if fixed_cutsel else True
+    heuristics = False if fixed_cutsel else True
+    aggressive = True if fixed_cutsel else False
     dummy_branch = True if root else False
-
-    # Check is a solution file exists. This solution file should be next to the instance file
-    if os.path.isfile(os.path.splitext(instance_path)[0] + '.sol'):
-        sol_file = os.path.splitext(instance_path)[0] + '.sol'
-    else:
-        sol_file = None
 
     # Build the actual SCIP model from the information now
     scip = build_scip_model(instance_path, node_lim, rand_seed, False, propagation, True, heuristics, aggressive,
-                            dummy_branch, time_limit=time_limit, sol_path=sol_file,
+                            dummy_branch, time_limit=time_limit, sol_path=solution_path,
                             dir_cut_off=dir_cut_off, efficacy=efficacy, int_support=int_support,
                             obj_parallelism=obj_parallelism)
 
@@ -107,6 +104,8 @@ def solve_model_and_extract_solve_info(scip, dir_cut_off, efficacy, int_support,
     data['num_lp_iterations'] = scip.getNLPIterations()
     # Get the status of the solve
     data['status'] = scip.getStatus()
+    # Get the primal-dual difference
+    data['primal_dual_difference'] = data['primal_bound'] - data['dual_bound'] if len(scip.getSols()) > 0 else 1e+20
 
     # Save the sol file if we've been asked to
     if len(scip.getSols()) > 0 and print_sol:
@@ -157,15 +156,22 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('temp_dir', type=is_dir)
     parser.add_argument('instance_path', type=is_file)
+    parser.add_argument('solution_path', type=str)
     parser.add_argument('instance', type=str)
     parser.add_argument('rand_seed', type=int)
     parser.add_argument('sample_i', type=int)
     parser.add_argument('time_limit', type=int)
     parser.add_argument('root', type=str_to_bool)
+    parser.add_argument('fixed_cutsel', type=str_to_bool)
     parser.add_argument('print_sol', type=str_to_bool)
     parser.add_argument('print_stats', type=str_to_bool)
     args = parser.parse_args()
 
+    if args.solution_path == 'None':
+        args.solution_path = None
+    else:
+        assert os.path.isfile(args.solution_path)
+
     # The main function call to run a SCIP instance with cut-sel params
-    run_instance(args.temp_dir, args.instance_path, args.instance,
-                 args.rand_seed, args.sample_i, args.time_limit, args.root, args.print_sol, args.print_stats)
+    run_instance(args.temp_dir, args.instance_path, args.solution_path, args.instance, args.rand_seed, args.sample_i,
+                 args.time_limit, args.root, args.fixed_cutsel, args.print_sol, args.print_stats)

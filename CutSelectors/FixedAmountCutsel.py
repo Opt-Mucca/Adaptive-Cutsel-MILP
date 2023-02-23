@@ -2,6 +2,8 @@
 from pyscipopt import Model, quicksum, SCIP_RESULT, SCIP_PARAMSETTING
 from pyscipopt.scip import Cutsel
 import random
+import math
+
 
 class FixedAmountCutsel(Cutsel):
 
@@ -54,10 +56,10 @@ class FixedAmountCutsel(Cutsel):
             good_max_parallel = max(0.5, max_parallel)
 
         # Generate the scores of each cut and thereby the maximum score
-        max_forced_score, forced_scores = self.scoring(forcedcuts)
+        # max_forced_score, forced_scores = self.scoring(forcedcuts)
         max_non_forced_score, scores = self.scoring(cuts)
 
-        good_score = max(max_forced_score, max_non_forced_score)
+        good_score = max_non_forced_score
 
         # This filters out all cuts in cuts who are parallel to a forcedcut.
         for forced_cut in forcedcuts:
@@ -73,7 +75,8 @@ class FixedAmountCutsel(Cutsel):
                 cuts, scores = self.select_best_cut(n_cuts, nselectedcuts, cuts, scores)
                 nselectedcuts += 1
                 n_cuts -= 1
-                n_cuts, cuts, scores = self.filter_with_parallelism(n_cuts, nselectedcuts, cuts[nselectedcuts -1], cuts,
+                n_cuts, cuts, scores = self.filter_with_parallelism(n_cuts, nselectedcuts, cuts[nselectedcuts - 1],
+                                                                    cuts,
                                                                     scores, max_parallel, good_max_parallel,
                                                                     good_score)
 
@@ -101,39 +104,56 @@ class FixedAmountCutsel(Cutsel):
         # initialise the scoring of each cut as well as the max_score
         scores = [0] * len(cuts)
         max_score = 0.0
+        max_eff = 1
+        max_dcd = 1
 
         # We require this check as getBestSol() may return the lp solution, which is not a valid primal solution
         sol = self.model.getBestSol() if self.model.getNSols() > 0 else None
 
-        # Separate into two cases depending on whether the directed cutoff distance contributes to the score
-        if sol is not None:
-            for i in range(len(cuts)):
-                int_support = self.int_support_weight * \
-                              self.model.getRowNumIntCols(cuts[i]) / cuts[i].getNNonz()
-                obj_parallel = self.obj_parallel_weight * self.model.getRowObjParallelism(cuts[i])
-                efficacy = self.model.getCutEfficacy(cuts[i])
-                if cuts[i].isLocal():
-                    score = self.dir_cutoff_dist_weight * efficacy
+        # Get the maximum eff and dcd. We want to normalise the values of these measures to be in [0,1]
+        # The functions we use are: (log(eff + 1) / log(max_eff + 1))**2 (The same for dcd respectively)
+        if len(cuts) >= 1:
+            max_eff = max([self.model.getCutEfficacy(cuts[i]) for i in range(len(cuts))])
+            max_dcd = max_eff if sol is None else max([self.model.getCutLPSolCutoffDistance(cuts[i], sol)
+                                                       for i in range(len(cuts))])
+
+        # Cycle over all cuts and score them
+        for i in range(len(cuts)):
+            int_support = self.int_support_weight * self.model.getRowNumIntCols(cuts[i]) / cuts[i].getNNonz()
+            obj_parallel = self.obj_parallel_weight * self.model.getRowObjParallelism(cuts[i])
+
+            efficacy = self.model.getCutEfficacy(cuts[i])
+            if efficacy <= 0:
+                efficacy = 0
+            else:
+                try:
+                    efficacy = (math.log(efficacy + 1) / math.log(max_eff + 1)) ** 2
+                except ZeroDivisionError:
+                    efficacy = 0
+
+            if sol is not None:
+                dir_cutoff = self.model.getCutLPSolCutoffDistance(cuts[i], sol)
+                efficacy_weight = self.efficacy_weight
+                if dir_cutoff <= 0:
+                    dir_cutoff = 0
                 else:
-                    score = self.model.getCutLPSolCutoffDistance(cuts[i], sol)
-                    score = self.dir_cutoff_dist_weight * max(score, efficacy)
-                efficacy *= self.efficacy_weight
-                score += obj_parallel + int_support + efficacy
-                score += 1e-4 if cuts[i].isInGlobalCutpool() else 0
-                score += random.uniform(0, 1e-6)
-                max_score = max(max_score, score)
-                scores[i] = score
-        else:
-            for i in range(len(cuts)):
-                int_support = self.int_support_weight * \
-                              self.model.getRowNumIntCols(cuts[i]) / cuts[i].getNNonz()
-                obj_parallel = self.obj_parallel_weight * self.model.getRowObjParallelism(cuts[i])
-                efficacy = (self.efficacy_weight + self.dir_cutoff_dist_weight) * self.model.getCutEfficacy(cuts[i])
-                score = int_support + obj_parallel + efficacy
-                score += 1e-4 if cuts[i].isInGlobalCutpool() else 0
-                score += random.uniform(0, 1e-6)
-                max_score = max(max_score, score)
-                scores[i] = score
+                    try:
+                        dir_cutoff = self.dir_cutoff_dist_weight * (
+                                math.log(dir_cutoff + 1) / math.log(max_dcd + 1)) ** 2
+                    except ZeroDivisionError:
+                        dir_cutoff = 0
+            else:
+                dir_cutoff = 0
+                efficacy_weight = self.efficacy_weight + self.dir_cutoff_dist_weight
+
+            efficacy = efficacy_weight * efficacy
+
+            # Make the score a sum of all measures
+            score = int_support + obj_parallel + efficacy + dir_cutoff
+            score += 1e-4 if cuts[i].isInGlobalCutpool() else 0
+            score += random.uniform(0, 1e-6)
+            max_score = max(max_score, score)
+            scores[i] = score
 
         return max_score, scores
 

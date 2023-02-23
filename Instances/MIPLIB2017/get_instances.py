@@ -6,12 +6,13 @@ import requests
 
 if __name__ == '__main__':
 
-    assert os.path.isdir('Instances/') and os.path.isfile('Instances/collection_set.csv')
-    assert os.path.isdir('Instances/Instances') and os.path.isdir('Instances/Solutions')
+    assert os.path.isdir('Instances/') and os.path.isdir('Instances/MIPLIB2017')
+    assert os.path.isfile('Instances/MIPLIB2017/collection_set.csv')
+    assert os.path.isdir('Instances/MIPLIB2017/Instances') and os.path.isdir('Instances/MIPLIB2017/Solutions')
 
     # Read the csv containing all instance names and tags
     instance_descriptions = []
-    with open('Instances/collection_set.csv', 'r') as s:
+    with open('Instances/MIPLIB2017/collection_set.csv', 'r') as s:
         reader = csv.reader(s, delimiter=',')
         for row in reader:
             instance_descriptions.append(row)
@@ -60,11 +61,11 @@ if __name__ == '__main__':
             num_no_miplib_solution_instances += 1
             continue
 
-        mps_file = 'Instances/Instances/{}.mps.gz'.format(instance)
+        mps_file = 'Instances/MIPLIB2017/Instances/{}.mps.gz'.format(instance)
         wget.download(mps_url, mps_file)
         time.sleep(0.1)
 
-        sol_file = 'Instances/Solutions/{}.sol.gz'.format(instance)
+        sol_file = 'Instances/MIPLIB2017/Solutions/{}.sol.gz'.format(instance)
         wget.download(sol_url, sol_file)
         time.sleep(0.1)
 

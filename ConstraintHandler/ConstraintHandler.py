@@ -18,10 +18,18 @@ class RepeatSepaConshdlr(Conshdlr):
     # fundamental callbacks
     def consenfolp(self, constraints, nusefulconss, solinfeasible):
 
-        if self.model.getNSepaRounds() <= self.max_separation_rounds and self.model.getNNodes() == 1:
+        if self.model.getNSepaRounds() < self.max_separation_rounds and self.model.getNNodes() == 1:
             return {'result': SCIP_RESULT.SOLVELP}
         else:
             return {'result': SCIP_RESULT.FEASIBLE}
+
+    def consenfops(self, constraints, nusefulconss, solinfeasible, objinfeasible):
+
+        if self.model.getNSepaRounds() < self.max_separation_rounds and self.model.getNNodes() == 1:
+            return {'result': SCIP_RESULT.SOLVELP}
+        else:
+            return {'result': SCIP_RESULT.FEASIBLE}
+
 
     def conscheck(self, constraints, solution, checkintegrality, checklprows, printreason, completely):
         return {"result": SCIP_RESULT.FEASIBLE}

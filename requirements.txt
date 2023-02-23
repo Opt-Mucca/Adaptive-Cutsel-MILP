@@ -2,7 +2,9 @@ numpy==1.18.5
 matplotlib==3.3.3
 -f https://download.pytorch.org/whl/torch_stable.html
 torch==1.7.0+cpu
-tensorboard==2.5.0
+tensorboard==2.9.1
 seaborn==0.11.1
 pyyaml==5.4.1
 Cython==0.29.27
+smac==1.4.0
+scikit-learn==1.1.2

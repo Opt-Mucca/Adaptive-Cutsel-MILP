@@ -1,5 +1,6 @@
 #! /usr/bin/env python
 import argparse
+import os
 from utilities import is_dir, is_file, build_scip_model, get_filename, str_to_bool
 import parameters
 
@@ -7,16 +8,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('transformed_problem_dir', type=is_dir)
     parser.add_argument('instance_path', type=is_file)
-    parser.add_argument('sol_path', type=is_file)
+    parser.add_argument('sol_path', type=str)
     parser.add_argument('instance', type=str)
     parser.add_argument('rand_seed', type=int)
     parser.add_argument('trans_sol', type=str_to_bool)
     args = parser.parse_args()
 
     # Generate the instance post pre-solve and print out the transformed model
+    if args.trans_sol:
+        assert os.path.isfile(args.sol_path)
     sol_path = args.sol_path if args.trans_sol else None
     scip = build_scip_model(args.instance_path, 1, args.rand_seed, True, True, False, False, False, True,
                             time_limit=parameters.PRESOLVE_TIME_LIMIT, sol_path=sol_path)
+
+    # In the case that the instance is a maximisation problem, convert it to a minimisation problem
+    if scip.getObjectiveSense() == 'maximize':
+        obj_offset = scip.getObjoffset()
+        scip.setObjective(-1 * scip.getObjective(), sense='minimize', clear='true')
+        scip.addObjoffset(-1 * obj_offset)
 
     if args.trans_sol:
         # The original solution is not always feasible in the transformed space. We thus disable dual pre-solve
@@ -48,6 +57,8 @@ if __name__ == '__main__':
                                         root=False, sample_i=None, ext='sol')
 
     # Write the actual transformed instance file
+    assert scip.getObjectiveSense() == 'minimize', 'Instance {} with seed {} is a maximisation problem!'.format(
+        args.instance, args.rand_seed)
     scip.writeProblem(filename=transformed_file_name, trans=True)
 
     # In the case of using MIPLIB solutions, we want to print out the pre-loaded transformed solution

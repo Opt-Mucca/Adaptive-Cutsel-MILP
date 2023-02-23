@@ -2,12 +2,24 @@
 import os
 import argparse
 import numpy as np
+import yaml
 from utilities import build_scip_model, is_dir, get_filename, remove_slurm_files, remove_temp_files
 from BranchRules.RootNodeFeatureExtractorBranchRule import RootNodeFeatureExtractor
 
 
-def generate_feature_vectors(instance, rand_seed, transformed_problem_dir):
+def generate_feature_vectors(instance, rand_seed, transformed_problem_dir, feature_dir):
+    """
+    Main parent function for generating the .npy file representations of the GNN for the instance + seed combination.
+    Args:
+        instance (str): The instance name
+        rand_seed (int): The random seed
+        transformed_problem_dir (dir): The directory where the instance is stored
+        feature_dir (dir): The directory where the feature representations will be stored
 
+    Returns:
+        The aggregate information of the feature representation.
+        It also creates .npy files of all instance + seed combinations.
+    """
     # Load the pre-solved instance and generate the feature vector
     file = get_filename(transformed_problem_dir, instance, rand_seed, trans=True, root=False, sample_i=None, ext='mps')
     assert os.path.isfile(file)
@@ -20,10 +32,11 @@ def generate_feature_vectors(instance, rand_seed, transformed_problem_dir):
     scip.freeProb()
 
     # Extract the features from the read friendly dictionary format
-    edge_indices, coefficients, col_features, row_features = extract_features_from_dict(feature_dict)
+    edge_indices, coefficients, col_features, row_features, aggregate_features = extract_features_from_dict(
+        feature_dict)
 
     # Save the various instance features into different files.
-    file = get_filename(transformed_problem_dir, instance, rand_seed=rand_seed, trans=True, root=False, sample_i=None,
+    file = get_filename(feature_dir, instance, rand_seed=rand_seed, trans=True, root=False, sample_i=None,
                         ext='npy')
     file_base = os.path.splitext(file)[0]
     np.save('{}__edge_indices.npy'.format(file_base), edge_indices)
@@ -31,7 +44,7 @@ def generate_feature_vectors(instance, rand_seed, transformed_problem_dir):
     np.save('{}__row_features.npy'.format(file_base), row_features)
     np.save('{}__col_features.npy'.format(file_base), col_features)
 
-    return
+    return aggregate_features
 
 
 def ensure_features_are_correct(feature_dict):
@@ -191,7 +204,7 @@ def extract_features_from_dict(feature_dict):
     has_ubs = np.array([feature_dict['cols'][col_i]['has_ub'] for col_i in feature_dict['cols']])
 
     '''
-    Non static column features. These features depend on LP solver
+    # Non static column features. These features depend on LP solver
     sol_vals = np.array([feature_dict['cols'][col_i]['sol_val'] for col_i in feature_dict['cols']])
     basis_lower = np.array([feature_dict['cols'][col_i]['lower'] for col_i in feature_dict['cols']])
     basis_basic = np.array([feature_dict['cols'][col_i]['basic'] for col_i in feature_dict['cols']])
@@ -221,6 +234,7 @@ def extract_features_from_dict(feature_dict):
     varbound_cons = np.array([feature_dict['rows'][row_i]['varbound'] for row_i in feature_dict['rows']])
 
     '''
+    # Non static row features. These features depend on LP solver
     row_at_lbs = np.array([feature_dict['rows'][row_i]['is_at_lb'] for row_i in feature_dict['rows']])
     row_at_ubs = np.array([feature_dict['rows'][row_i]['is_at_ub'] for row_i in feature_dict['rows']])
     dual_sol_vals = np.array([feature_dict['rows'][row_i]['dual_sol_val'] for row_i in feature_dict['rows']])
@@ -231,28 +245,40 @@ def extract_features_from_dict(feature_dict):
     row_features = np.stack((obj_cosines, biases, linear_cons, logicor_cons, knapsack_cons, setppc_cons, varbound_cons),
                             axis=-1)
 
-    return edge_indices, coefficients, col_features, row_features
+    # To experiment with some other algorithms. Construct a dictionary containing the aggregated features
+    density_objective = 0
+    for col_i in feature_dict['cols']:
+        if abs(feature_dict['cols'][col_i]['obj_coeff']) > 0:
+            density_objective += 1
+    density_objective /= len(feature_dict['cols'])
+    aggregate_features = {'density_non_zeros': (len(feature_dict['edges']) /
+                                                (len(feature_dict['rows']) * len(feature_dict['cols']))),
+                          'linear_cons': float(sum(linear_cons) / len(feature_dict['rows'])),
+                          'logicor_cons': float(sum(logicor_cons) / len(feature_dict['rows'])),
+                          'knapsack_cons': float(sum(knapsack_cons) / len(feature_dict['rows'])),
+                          'setppc_cons': float(sum(setppc_cons) / len(feature_dict['rows'])),
+                          'varbound_cons': float(sum(varbound_cons) / len(feature_dict['rows'])),
+                          'obj_cosines': float(sum(obj_cosines) / len(feature_dict['rows'])),
+                          'binaries': float(sum(binaries) / len(feature_dict['cols'])),
+                          'integers': float(sum(integers) / len(feature_dict['cols'])),
+                          'continuous': float(sum(continuous) / len(feature_dict['cols'])),
+                          'implicit_integers': float(sum(implicit_ints) / len(feature_dict['cols'])),
+                          'objective_density': density_objective}
 
-
-def remove_previous_npy_files(transformed_problem_dir):
-
-    for file in os.listdir(transformed_problem_dir):
-        if file.endswith('.npy'):
-            os.remove(os.path.join(transformed_problem_dir, file))
-
-    return
+    return edge_indices, coefficients, col_features, row_features, aggregate_features
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('transformed_problem_dir', type=is_dir)
+    parser.add_argument('feature_dir', type=is_dir)
     parser.add_argument('temp_dir', type=is_dir)
     parser.add_argument('outfile_dir', type=is_dir)
     parser.add_argument('num_rand_seeds', type=int)
     args = parser.parse_args()
 
     # Remove all solve information from previous runs
-    remove_previous_npy_files(args.transformed_problem_dir)
+    remove_temp_files(args.feature_dir)
     remove_temp_files(args.temp_dir)
     # Make a subdirectory within the outfile_dir for this runs information
     args.outfile_dir = os.path.join(args.outfile_dir, 'feature_generation')
@@ -271,7 +297,7 @@ if __name__ == "__main__":
 
     instance_names = list(instance_names)
     print('List of instances are: {}'.format(instance_names), flush=True)
-    print('There are {} may instances'.format(len(instance_names)), flush=True)
+    print('There are {} many instances'.format(len(instance_names)), flush=True)
 
     # Initialise the random seeds
     random_seeds = [random_seed for random_seed in range(1, args.num_rand_seeds + 1)]
@@ -282,13 +308,29 @@ if __name__ == "__main__":
         for random_seed in random_seeds:
             mps_file = get_filename(args.transformed_problem_dir, instance_name, random_seed, trans=True, root=False,
                                     sample_i=None, ext='mps')
-            npy_file = get_filename(args.transformed_problem_dir, instance_name, random_seed, trans=True, root=False,
-                                    sample_i=None, ext='npy')
             assert os.path.isfile(mps_file), 'File {} does not exist'.format(mps_file)
-            assert not os.path.isfile(npy_file), 'File {} already exists'.format(npy_file)
             instance_paths.append(mps_file)
+
+    instance_seed_aggregate_features = {instance: {random_seed: None for random_seed in random_seeds}
+                                        for instance in instance_names}
 
     for instance_name in instance_names:
         for random_seed in random_seeds:
             print('Generating features for {} with seed {}'.format(instance_name, random_seed), flush=True)
-            generate_feature_vectors(instance_name, random_seed, args.transformed_problem_dir)
+            average_features = generate_feature_vectors(instance_name, random_seed, args.transformed_problem_dir,
+                                                        args.feature_dir)
+            instance_seed_aggregate_features[instance_name][random_seed] = average_features
+
+    # Save the aggregate feature representation
+    aggregate_feature_file = os.path.join(args.feature_dir, 'aggregate_features.yml')
+    instance_aggregate_features = {instance_name: None for instance_name in instance_names}
+    aggregate_feature_keys = list(instance_seed_aggregate_features[instance_names[0]][random_seeds[0]].keys())
+    aggregate_feature_data = {}
+    for instance_name in instance_names:
+        aggregate_feature_data[instance_name] = {}
+        for feature_key in aggregate_feature_keys:
+            value = sum([instance_seed_aggregate_features[instance_name][random_seed][feature_key]
+                         for random_seed in random_seeds]) / len(random_seeds)
+            aggregate_feature_data[instance_name][feature_key] = value
+    with open(aggregate_feature_file, 'w') as s:
+        yaml.dump(aggregate_feature_data, s)

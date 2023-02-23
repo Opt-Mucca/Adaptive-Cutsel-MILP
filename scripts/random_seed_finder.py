@@ -3,14 +3,13 @@ import numpy as np
 import os
 import torch
 from GNN.GNN import GNNPolicy
-from utilities import is_dir, read_feature_vector_files
-from Slurm.train_neural_network import get_instances
+from utilities import is_dir, read_feature_vector_files, get_instances
 from parameters import NUM_TORCH_SEEDS
 
 
-def get_random_seeds(data_dir):
-    files = os.listdir(data_dir)
-    files = [file for file in files if file.endswith('.yml')]
+def get_random_seeds(instance_dir):
+    files = os.listdir(instance_dir)
+    files = [file for file in files if file.endswith('.mps')]
     rand_seeds = set()
     for file in files:
         file_base_name = os.path.splitext(file)[0]
@@ -22,14 +21,15 @@ def get_random_seeds(data_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('data_dir', type=is_dir)
+    parser.add_argument('instance_dir', type=is_dir)
+    parser.add_argument('feature_dir', type=is_dir)
     args = parser.parse_args()
 
     # Get the list of instances
-    instances = get_instances(args.data_dir)
+    instances = get_instances(args.instance_dir)
 
     # Get the random seeds
-    random_seeds = get_random_seeds(args.data_dir)
+    random_seeds = get_random_seeds(args.instance_dir)
 
     # The reference vector
     reference_vector = np.array([0.25, 0.25, 0.25, 0.25])
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         for instance in instances:
             for random_seed in random_seeds:
                 edge_indices, coefficients, col_features, row_features = read_feature_vector_files(
-                    args.data_dir, instance, random_seed, torch_output=True)
+                    args.feature_dir, instance, random_seed, torch_output=True)
                 cut_selector_params = neural_network.forward(edge_indices, coefficients, col_features, row_features)
                 cut_selector_params = cut_selector_params.detach().numpy()
                 distance = float(np.mean(np.abs(cut_selector_params - reference_vector)))

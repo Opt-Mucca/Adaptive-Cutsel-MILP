@@ -53,6 +53,10 @@ def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation,
         # Additionally, we want constraints to be the appropriate types and not just linear for additional separators
         scip.setParam('presolving/maxrounds', 1)
         # scip.setPresolve(SCIP_PARAMSETTING.OFF)
+        # We do not want the solve process to restart and potentially trigger another presolve or remove cuts.
+        scip.setParam('estimation/restarts/restartlimit', 0)
+        scip.setParam('estimation/restarts/restartpolicy', 'n')
+        scip.setParam('presolving/maxrestarts', 0)
     if not propagation:
         scip.disablePropagation()
     if not separators:
@@ -75,9 +79,8 @@ def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation,
                            1000000)
         # Set the separator parameters
         scip.setParam('separating/maxstallroundsroot', num_rounds)
-        scip = set_scip_separator_params(scip, num_rounds, -1, cuts_per_round, cuts_per_round, 0)
+        scip = set_scip_separator_params(scip, num_rounds, 0, cuts_per_round, 0, 0)
     else:
-        # scip = set_scip_separator_params(scip, -1, -1, 5000, 100, 10)
         scip = set_scip_cut_selector_params(scip, dir_cut_off, efficacy, int_support, obj_parallelism)
     if not heuristics:
         scip.setHeuristics(SCIP_PARAMSETTING.OFF)
@@ -93,7 +96,7 @@ def build_scip_model(instance_path, node_lim, rand_seed, pre_solve, propagation,
     scip.readProblem(instance_path)
 
     if sol_path is not None:
-        assert os.path.isfile(sol_path) and '.sol' in sol_path
+        assert os.path.isfile(sol_path) and '.sol' in sol_path, 'Sol is {}'.format(sol_path)
         # Create the solution to add to SCIP
         sol = scip.readSolFile(sol_path)
         # Add the solution. This automatically frees the loaded solution
@@ -146,8 +149,8 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/aggregation/freq', frequency)
     scip.setParam('separating/aggregation/maxrounds', max_rounds)
     scip.setParam('separating/aggregation/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/aggregation/maxsepacuts', 10000)
-    scip.setParam('separating/aggregation/maxsepacutsroot', 10000)
+    scip.setParam('separating/aggregation/maxsepacuts', 1000)
+    scip.setParam('separating/aggregation/maxsepacutsroot', 1000)
 
     # Now the Chvatal-Gomory w/ MIP separator
     # scip.setParam('separating/cgmip/freq', frequency)
@@ -156,7 +159,7 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
 
     # The clique separator
     scip.setParam('separating/clique/freq', frequency)
-    scip.setParam('separating/clique/maxsepacuts', 10000)
+    scip.setParam('separating/clique/maxsepacuts', 1000)
 
     # The close-cuts separator
     scip.setParam('separating/closecuts/freq', frequency)
@@ -172,16 +175,16 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/disjunctive/freq', frequency)
     scip.setParam('separating/disjunctive/maxrounds', max_rounds)
     scip.setParam('separating/disjunctive/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/disjunctive/maxinvcuts', 10000)
-    scip.setParam('separating/disjunctive/maxinvcutsroot', 10000)
+    scip.setParam('separating/disjunctive/maxinvcuts', 1000)
+    scip.setParam('separating/disjunctive/maxinvcutsroot', 1000)
     scip.setParam('separating/disjunctive/maxdepth', -1)
 
     # The separator for edge-concave function
     scip.setParam('separating/eccuts/freq', frequency)
     scip.setParam('separating/eccuts/maxrounds', max_rounds)
     scip.setParam('separating/eccuts/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/eccuts/maxsepacuts', 10000)
-    scip.setParam('separating/eccuts/maxsepacutsroot', 10000)
+    scip.setParam('separating/eccuts/maxsepacuts', 1000)
+    scip.setParam('separating/eccuts/maxsepacutsroot', 1000)
     scip.setParam('separating/eccuts/maxdepth', -1)
 
     # The flow cover cut separator
@@ -194,8 +197,8 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/gomory/freq', frequency)
     scip.setParam('separating/gomory/maxrounds', max_rounds)
     scip.setParam('separating/gomory/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/gomory/maxsepacuts', 10000)
-    scip.setParam('separating/gomory/maxsepacutsroot', 10000)
+    scip.setParam('separating/gomory/maxsepacuts', 1000)
+    scip.setParam('separating/gomory/maxsepacutsroot', 1000)
 
     # The implied bounds separator
     scip.setParam('separating/impliedbounds/freq', frequency)
@@ -208,15 +211,15 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
 
     # The multi-commodity-flow network cut separator
     scip.setParam('separating/mcf/freq', frequency)
-    scip.setParam('separating/mcf/maxsepacuts', 10000)
-    scip.setParam('separating/mcf/maxsepacutsroot', 10000)
+    scip.setParam('separating/mcf/maxsepacuts', 1000)
+    scip.setParam('separating/mcf/maxsepacutsroot', 1000)
 
     # The odd cycle separator
     scip.setParam('separating/oddcycle/freq', frequency)
     scip.setParam('separating/oddcycle/maxrounds', max_rounds)
     scip.setParam('separating/oddcycle/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/oddcycle/maxsepacuts', 10000)
-    scip.setParam('separating/oddcycle/maxsepacutsroot', 10000)
+    scip.setParam('separating/oddcycle/maxsepacuts', 1000)
+    scip.setParam('separating/oddcycle/maxsepacutsroot', 1000)
 
     # The rapid learning separator
     scip.setParam('separating/rapidlearning/freq', frequency)
@@ -229,23 +232,23 @@ def set_scip_separator_params(scip, max_rounds_root=-1, max_rounds=-1, max_cuts_
     scip.setParam('separating/zerohalf/maxcutcands', 100000)
     scip.setParam('separating/zerohalf/maxrounds', max_rounds)
     scip.setParam('separating/zerohalf/maxroundsroot', max_rounds_root)
-    scip.setParam('separating/zerohalf/maxsepacuts', 10000)
-    scip.setParam('separating/zerohalf/maxsepacutsroot', 10000)
+    scip.setParam('separating/zerohalf/maxsepacuts', 1000)
+    scip.setParam('separating/zerohalf/maxsepacutsroot', 1000)
 
     # The rlt separator
     scip.setParam('separating/rlt/freq', frequency)
-    scip.setParam('separating/rlt/maxncuts', 10000)
+    scip.setParam('separating/rlt/maxncuts', 1000)
     scip.setParam('separating/rlt/maxrounds', max_rounds)
     scip.setParam('separating/rlt/maxroundsroot', max_rounds_root)
 
     # Now the general cut and round parameters
-    scip.setParam("separating/maxroundsroot", max_rounds_root)
-    scip.setParam("separating/maxstallroundsroot", max_rounds_root)
-    scip.setParam("separating/maxcutsroot", max_cuts_root)
+    scip.setParam("separating/maxroundsroot", max_rounds_root - 1)
+    scip.setParam("separating/maxstallroundsroot", max_rounds_root - 1)
+    scip.setParam("separating/maxcutsroot", 10000)
 
-    scip.setParam("separating/maxrounds", max_rounds)
-    scip.setParam("separating/maxstallrounds", 1)
-    scip.setParam("separating/maxcuts", max_cuts)
+    scip.setParam("separating/maxrounds", 0)
+    scip.setParam("separating/maxstallrounds", 0)
+    scip.setParam("separating/maxcuts", 0)
 
     return scip
 
@@ -281,12 +284,12 @@ def get_covariance_matrix(epoch_i, num_epochs, start_val=0.01, end_val=0.001):
     return d * torch.eye(4)
 
 
-def read_feature_vector_files(problem_dir, instance, rand_seed, torch_output=False):
+def read_feature_vector_files(feature_dir, instance, rand_seed, torch_output=False):
     """
     This function just grabs the pre-calculated bipartite graph features from generate_features that have been
     written to files.
     Args:
-        problem_dir: The directory containing all appropriate files
+        feature_dir: The directory containing all appropriate files
         instance: The instance name
         rand_seed: The SCIP random seed shift used in the model pre-solving
         torch_output: Boolean on whether you want torch or numpy as the output format
@@ -296,13 +299,13 @@ def read_feature_vector_files(problem_dir, instance, rand_seed, torch_output=Fal
     """
 
     edge_indices = np.load(
-        os.path.join(problem_dir, '{}__trans__seed__{}__edge_indices.npy'.format(instance, rand_seed)))
+        os.path.join(feature_dir, '{}__trans__seed__{}__edge_indices.npy'.format(instance, rand_seed)))
     coefficients = np.load(
-        os.path.join(problem_dir, '{}__trans__seed__{}__coefficients.npy'.format(instance, rand_seed)))
+        os.path.join(feature_dir, '{}__trans__seed__{}__coefficients.npy'.format(instance, rand_seed)))
     col_features = np.load(
-        os.path.join(problem_dir, '{}__trans__seed__{}__col_features.npy'.format(instance, rand_seed)))
+        os.path.join(feature_dir, '{}__trans__seed__{}__col_features.npy'.format(instance, rand_seed)))
     row_features = np.load(
-        os.path.join(problem_dir, '{}__trans__seed__{}__row_features.npy'.format(instance, rand_seed)))
+        os.path.join(feature_dir, '{}__trans__seed__{}__row_features.npy'.format(instance, rand_seed)))
 
     if torch_output:
         # Transform the numpy arrays into the correct torch types
@@ -447,6 +450,8 @@ def run_python_slurm_job(python_file, job_name, outfile, time_limit, arg_list, d
     if exclusive:
         # This flag makes the timing reproducible, as no memory is shared between it and other jobs.
         cmd_2 = ['--exclusive']
+        if parameters.SLURM_QUEUE == 'M620v2,M620v3':
+            cmd_2 += ['--mem=64000']
     else:
         # We don't run exclusive always as we want more throughput. The run is still deterministic, but time can vary
         cmd_2 = ['--cpus-per-task={}'.format(num_cpus)]
@@ -482,6 +487,8 @@ def run_python_slurm_job(python_file, job_name, outfile, time_limit, arg_list, d
     assert 'Submitted batch job' in job_line, print(job_line)
     job_id = int(job_line.split(' ')[-1].split("'")[0])
 
+    p.terminate()
+    p.kill()
     del p
 
     return job_id
@@ -522,13 +529,14 @@ def get_filename(parent_dir, instance, rand_seed=None, trans=False, root=False, 
     return os.path.join(parent_dir, base_file)
 
 
-def get_slurm_output_file(outfile_dir, instance, rand_seed):
+def get_slurm_output_file(outfile_dir, instance, rand_seed, sample_i=None):
     """
     Function for getting the slurm output log for the current run.
     Args:
         outfile_dir: The directory containing all slurm .log files
         instance: The instance name
         rand_seed: The instance random seed
+        sample_i: The sample index used for the run
     Returns:
         The slurm .out file which is currently being used
     """
@@ -543,9 +551,16 @@ def get_slurm_output_file(outfile_dir, instance, rand_seed):
     # Get a unique substring that will only be contained for a single run
     file_substring = '__{}__seed__{}'.format(instance, rand_seed)
 
+    # Append the sample to the substring if a sample is provided
+    if sample_i is not None:
+        file_substring += '__sample__{}'.format(sample_i)
+
+    # Append the .out to the end of the outfile naming convention. Otherwise seed__1 is included in seed__10 etc
+    file_substring += '.out'
+
     unique_file = [out_file for out_file in out_files if file_substring in out_file]
-    assert len(unique_file) == 1, 'Instance {} with rand_seed {} has no outfile in {}'.format(instance, rand_seed,
-                                                                                              outfile_dir)
+    assert len(unique_file) == 1, 'Instance {} with r-seed {} has files {} in {}.'.format(instance, rand_seed,
+                                                                                          unique_file, outfile_dir)
     return os.path.join(outfile_dir, unique_file[0])
 
 
@@ -593,3 +608,57 @@ def is_file(path):
     else:
         return path
 
+
+def get_instances(instance_dir):
+    """
+    Function for getting all instance strings. These are pulled from the instance directory names.
+    Args:
+        instance_dir (dir): The directory in which all of our presolved mps files are stored
+
+    Returns:
+        A list of all instances
+    """
+
+    # Make sure all files in this directory are instance files
+    mps_files = os.listdir(instance_dir)
+    for mps_file in mps_files:
+        assert mps_file.endswith('.mps'), 'File {} in directory {} is not an instance file'.format(mps_file,
+                                                                                                   instance_dir)
+    instances = set()
+    for mps_file in mps_files:
+        instance_name = os.path.splitext(mps_file)[0].split('__')[0]
+        assert '__' not in instance_name, 'Instance {} is invalid'.format(instance_name)
+        instances.add(instance_name)
+    return sorted(list(instances))
+
+
+def get_random_seeds(instance_dir):
+    """
+    Function for getting all random seeds. These are pulled from the instance directory names.
+    Args:
+        instance_dir (dir): The directory in which all of our presolves mps files are stored
+
+    Returns:
+        A list of all random seeds
+    """
+
+    # Make sure all files in this directory are instance files
+    mps_files = os.listdir(instance_dir)
+    for mps_file in mps_files:
+        assert mps_file.endswith('.mps'), 'File {} in directory {} is not an instance file'.format(mps_file,
+                                                                                                   instance_dir)
+
+    # Get the rand seeds from the file names
+    rand_seeds = set()
+    for mps_file in mps_files:
+        rand_seed_str = os.path.splitext(mps_file)[0].split('__')[-1]
+        assert '__' not in rand_seed_str, 'Rand seed {} is invalid'.format(rand_seed_str)
+        rand_seeds.add(int(rand_seed_str))
+
+    # Make sure the random seeds are in order
+    rand_seeds = sorted(list(rand_seeds))
+    for rand_seed_i, rand_seed in enumerate(rand_seeds):
+        if rand_seed_i < len(rand_seeds) - 1:
+            assert rand_seed == rand_seeds[
+                rand_seed_i + 1] - 1, 'Random seeds {} do not represent a python range'.format(rand_seeds)
+    return rand_seeds

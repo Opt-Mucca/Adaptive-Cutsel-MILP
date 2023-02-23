@@ -3,18 +3,22 @@ import os
 import argparse
 import yaml
 import numpy as np
-from utilities import remove_instance_solve_data, is_dir
-from utilities import str_to_bool, remove_slurm_files, get_filename, remove_temp_files, run_python_slurm_job
-from Slurm.train_neural_network import wait_for_slurm_jobs_and_extract_solve_info
+import logging
+import time
+from utilities import remove_instance_solve_data, is_dir, get_instances, get_random_seeds, get_slurm_output_file, \
+    str_to_bool, remove_slurm_files, get_filename, remove_temp_files, run_python_slurm_job
+import parameters
 
 
-def parameter_sweep(data_dir, temp_dir, outfile_dir, instance, rand_seeds, root):
+def parameter_sweep(instance_dir, solution_dir, default_results_dir, temp_dir, outfile_dir, instance, rand_seeds, root):
     """
     Main function for doing a parameter sweep and finding the potential improvement through adaptive cut-selection.
     This parameter sweep goes through all convex combinations of dir_cut_off, efficacy, int_support, and
     obj_parallelism. All values are a multiple of 0.1, and they must sum to 1.
     Args:
-        data_dir: The directory containing all of our standard generated data
+        instance_dir: The directory containing all of our presolved MILP instances
+        solution_dir: The directory containing all our primal solutions for the presolved MILP instances
+        default_results_dir: The directory containing all default SCIP run statistics for each instance
         temp_dir: The directory where we will throw all of our temporary files only related to this run
         outfile_dir: The directory where we store all .log files for this run and runs called from it
         instance: The instance that we perform our parameter sweep on
@@ -50,15 +54,17 @@ def parameter_sweep(data_dir, temp_dir, outfile_dir, instance, rand_seeds, root)
     slurm_job_ids = []
     for rand_seed in rand_seeds:
         for sample_i in range(len(convex_combinations)):
-            instance_file = get_filename(data_dir, instance, rand_seed, trans=True, root=False, sample_i=None,
+            instance_file = get_filename(instance_dir, instance, rand_seed, trans=True, root=False, sample_i=None,
                                          ext='mps')
+            solution_file = get_filename(solution_dir, instance, rand_seed, trans=True, root=False, sample_i=None,
+                                         ext='sol')
             ji = run_python_slurm_job(python_file='Slurm/solve_instance_seed_noise.py',
                                       job_name='{}--{}--{}'.format(instance, rand_seed, sample_i),
                                       outfile=os.path.join(outfile_dir, '%j__{}__seed__{}__sample__{}.out'.format(
                                        instance, rand_seed, sample_i)),
                                       time_limit=120,
-                                      arg_list=[temp_dir, instance_file,
-                                                instance, rand_seed, sample_i, -1, root, False, False])
+                                      arg_list=[temp_dir, instance_file, solution_file,
+                                                instance, rand_seed, sample_i, -1, root, True, False, False])
             slurm_job_ids.append(ji)
 
     # Now submit the checker job that has dependencies slurm_job_ids
@@ -71,15 +77,35 @@ def parameter_sweep(data_dir, temp_dir, outfile_dir, instance, rand_seeds, root)
                              dependencies=slurm_job_ids)
 
     # Wait on jobs to finish and extract the solve information
-    sampled_cut_selector_params = {instance: {rand_seed: convex_combinations for rand_seed in rand_seeds}}
-    data, _ = wait_for_slurm_jobs_and_extract_solve_info(temp_dir, [instance], rand_seeds, len(convex_combinations),
-                                                         sampled_cut_selector_params, signal_file, root=True,
-                                                         wait_time=10)
+    data, numeric_issue = wait_for_slurm_jobs_and_extract_solve_info(temp_dir, outfile_dir, instance, rand_seeds,
+                                                                     len(convex_combinations), signal_file, root=True,
+                                                                     wait_time=10)
+
+    if numeric_issue:
+        return None, None, True, True, False, False, True, False, None
+
+    # Filter out instances with the same reasons as the standard solve!
+    incorrect_cut_amounts = False
+    instance_is_optimal = False
+    low_primal_dual_difference = False
+    if root:
+        for rand_seed in rand_seeds:
+            for sample_i in range(len(convex_combinations)):
+                if data[rand_seed][sample_i]['status'] == 'optimal':
+                    instance_is_optimal = True
+                if data[rand_seed][sample_i]['primal_dual_difference'] < parameters.MIN_PRIMAL_DUAL_DIFFERENCE:
+                    low_primal_dual_difference = True
+                min_cuts = parameters.MIN_NUM_CUT_RATIO * parameters.NUM_CUT_ROUNDS * parameters.NUM_CUTS_PER_ROUND
+                max_cuts = parameters.MAX_NUM_CUT_RATIO * parameters.NUM_CUT_ROUNDS * parameters.NUM_CUTS_PER_ROUND
+                if data[rand_seed][sample_i]['num_cuts'] < min_cuts:
+                    incorrect_cut_amounts = True
+                elif data[rand_seed][sample_i]['num_cuts'] > max_cuts:
+                    incorrect_cut_amounts = True
 
     # Now average our results over each random seed
     mean_scores = {}
     for sample_i in range(len(convex_combinations)):
-        scores = [data[instance][rand_seed][sample_i]['gap'] for rand_seed in rand_seeds]
+        scores = [data[rand_seed][sample_i]['primal_dual_difference'] for rand_seed in rand_seeds]
         if len(scores) > 0:
             mean_scores[sample_i] = np.mean(scores)
 
@@ -105,10 +131,11 @@ def parameter_sweep(data_dir, temp_dir, outfile_dir, instance, rand_seeds, root)
     # Now average the results for the standard solve over the random seeds
     standard_scores = []
     for rand_seed in rand_seeds:
-        yml_file = get_filename(data_dir, instance, rand_seed, trans=True, root=root, sample_i=None, ext='yml')
+        yml_file = get_filename(default_results_dir, instance, rand_seed, trans=True, root=root, sample_i=None,
+                                ext='yml')
         with open(yml_file, 'r') as s:
             info = yaml.safe_load(s)
-        score = info['gap']
+        score = info['primal_dual_difference']
         standard_scores.append(score)
     standard_score = np.mean(standard_scores)
 
@@ -137,15 +164,89 @@ def parameter_sweep(data_dir, temp_dir, outfile_dir, instance, rand_seeds, root)
               flush=True)
         unique_optimal_choices = False
 
+    results_dict = {sample_i: {'dir_cut_off': convex_combinations[sample_i][0],
+                               'efficacy': convex_combinations[sample_i][1],
+                               'int_support': convex_combinations[sample_i][2],
+                               'obj_parallelism': convex_combinations[sample_i][3],
+                               'improvement': float((standard_score - mean_scores[sample_i]) /
+                                                    (np.abs(standard_score) + 1e-8))}
+                    for sample_i in range(len(convex_combinations)) if sample_i in mean_scores}
+
     if not is_potential_improvement or not unique_optimal_choices:
-        return None, None, is_potential_improvement, unique_optimal_choices
+        return None, None, is_potential_improvement, unique_optimal_choices, incorrect_cut_amounts, \
+               instance_is_optimal, numeric_issue, low_primal_dual_difference, results_dict
     else:
-        return best_improvement, best_combinations, is_potential_improvement, unique_optimal_choices
+        return best_improvement, best_combinations, is_potential_improvement, unique_optimal_choices, \
+               incorrect_cut_amounts, instance_is_optimal, numeric_issue, low_primal_dual_difference, results_dict
+
+
+def wait_for_slurm_jobs_and_extract_solve_info(temp_dir, outfile_dir, instance, rand_seeds, num_samples, signal_file,
+                                               root=True, wait_time=3):
+    """
+    Function that puts the program to sleep until all slurm jobs are complete. Once all jobs are complete
+    it extract the information from the individual YAML files produced by each run.
+    To see if all jobs are complete, it checks if the signal_file has been created. This is created from a job
+    that will only run if all other jobs in the batch have been completed.
+    Args:
+        temp_dir: The temporary file directory where all files associated with the current batch are stored
+        outfile_dir: The directory where all out files for the runs are stored
+        instance: The instance we are concerned with
+        rand_seeds: The random seeds which we used to in parallel SCIP solves
+        num_samples: The number of samples which we took for each instance-seed pairing
+        signal_file: The file that when created indicates all jobs are complete
+        root: Whether the solve info we're waiting on was restricted to the root node. This affects file naming.
+        wait_time: The wait_time between asking slurm about the job statuses
+    Returns:
+        All solve information related to the current instance. Also tells us if there was an error in any runs
+    """
+
+    # Put the program to sleep until all of slurm jobs are complete
+    time.sleep(wait_time)
+    while signal_file not in os.listdir(temp_dir):
+        time.sleep(wait_time)
+
+    # Initialise the data directory which we'll load all of our solve information into
+    data = {rand_seed: {} for rand_seed in rand_seeds}
+    numeric_issues = False
+
+    # Check if there were problems with the instance during solving. All successful solves should have a YAML file
+    for rand_seed in rand_seeds:
+        # Keep track of all runs that failed, regardless of the reason. We then remove those samples
+        invalid_runs = []
+        for sample_i in range(num_samples):
+            # Get the yml file name that would represent this run
+            file_name = get_filename(temp_dir, instance, rand_seed, trans=True, root=root, sample_i=sample_i,
+                                     ext='yml')
+            if not os.path.isfile(file_name):
+                logging.warning('Instance {} with seed {} and sample_i {} failed'.format(instance, rand_seed, sample_i))
+                # Check if the instance failed for numeric reasons
+                out_file = get_slurm_output_file(outfile_dir, instance, rand_seed, sample_i=sample_i)
+                with open(out_file, 'r') as s:
+                    out_file_contents = s.readlines()
+                numeric_issues = False
+                for line in out_file_contents:
+                    if 'unresolved numerical troubles in LP' in line and '-- aborting' in line:
+                        numeric_issues = True
+                        break
+                if not numeric_issues:
+                    print('Instance {} with seed {} and sample {} failed for unknown reasons. Stopping run'.format(
+                        instance, rand_seed, sample_i), flush=True)
+                else:
+                    return None, True
+            with open(file_name, 'r') as s:
+                data[rand_seed][sample_i] = yaml.safe_load(s)
+
+    return data, numeric_issues
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('data_dir', type=is_dir)
+    parser.add_argument('instance_dir', type=is_dir)
+    parser.add_argument('solution_dir', type=is_dir)
+    parser.add_argument('feature_dir', type=is_dir)
+    parser.add_argument('default_root_results_dir', type=is_dir)
+    parser.add_argument('default_full_results_dir', type=is_dir)
+    parser.add_argument('results_dir', type=is_dir)
     parser.add_argument('temp_dir', type=is_dir)
     parser.add_argument('outfile_dir', type=is_dir)
     parser.add_argument('root', type=str_to_bool)
@@ -160,57 +261,105 @@ if __name__ == '__main__':
         remove_slurm_files(args.outfile_dir)
 
     # Initialise a list of instances
-    instance_names = set()
-    random_seeds = set()
-
-    for file in os.listdir(args.data_dir):
-        # Extract the instance and seed from the instance:path
-        if file.endswith('.yml'):
-            instance_name = os.path.splitext(file)[0].split('__')[0]
-            random_seed = int(os.path.splitext(file)[0].split('__')[-1])
-            instance_names.add(instance_name)
-            random_seeds.add(random_seed)
-
-    instance_names = list(instance_names)
-    random_seeds = list(random_seeds)
+    instance_names = get_instances(args.instance_dir)
+    random_seeds = get_random_seeds(args.instance_dir)
 
     valid_instances = []
     no_improvement_instances = set()
     always_improvement_instances = set()
+    incorrect_cut_amount_instances = set()
+    optimal_instances = set()
+    numerical_issues_instances = set()
+    primal_dual_instances = set()
 
     # Initialise the dictionary where we store the potential improvement for the instance
     improvements = {instance_name: {} for instance_name in instance_names}
+    full_results_dict = {instance_name: {} for instance_name in instance_names}
 
     for instance_name in instance_names:
         # The main function call to begin the parameter sweep
-        gain, parameters, is_improvement, is_unique = parameter_sweep(args.data_dir, args.temp_dir, args.outfile_dir,
-                                                                      instance_name, random_seeds, args.root)
+        gain, params, is_improvement, is_unique, no_cuts, optimal, numerics, low_pd_diff, results = parameter_sweep(
+            args.instance_dir, args.solution_dir, args.default_root_results_dir, args.temp_dir, args.outfile_dir,
+            instance_name, random_seeds, args.root)
         # We don't want any instances in our training set where all cut-sel param choices result in same solve process
-        if not is_improvement or not is_unique:
-            remove_instance_solve_data(args.data_dir, instance_name, suppress_warnings=True)
+        if not is_improvement or not is_unique or no_cuts or optimal or numerics or low_pd_diff:
+            remove_instance_solve_data(args.instance_dir, instance_name, suppress_warnings=True)
+            remove_instance_solve_data(args.solution_dir, instance_name, suppress_warnings=True)
+            remove_instance_solve_data(args.feature_dir, instance_name, suppress_warnings=True)
+            remove_instance_solve_data(args.default_root_results_dir, instance_name, suppress_warnings=True)
+            remove_instance_solve_data(args.default_full_results_dir, instance_name, suppress_warnings=True)
             del improvements[instance_name]
+            del full_results_dict[instance_name]
             if not is_improvement:
                 no_improvement_instances.add(instance_name)
             if not is_unique:
                 always_improvement_instances.add(instance_name)
+            if no_cuts:
+                incorrect_cut_amount_instances.add(instance_name)
+            if optimal:
+                optimal_instances.add(instance_name)
+            if numerics:
+                numerical_issues_instances.add(instance_name)
+            if low_pd_diff:
+                primal_dual_instances.add(instance_name)
         else:
             improvements[instance_name]['improvement'] = gain
-            improvements[instance_name]['parameters'] = parameters
+            improvements[instance_name]['parameters'] = params
             valid_instances.append(instance_name)
+            full_results_dict[instance_name] = results
+
         # Remove the temp files produced by the previous run
         remove_temp_files(args.temp_dir)
 
     print('{} instances remain from {}'.format(len(valid_instances), len(instance_names)), flush=True)
+
+    # Print out the reasons behind instances being filtered
     print('{} instances filtered as no improvements possible. Instances {}'.format(
         len(no_improvement_instances), no_improvement_instances), flush=True)
     print('{} instances filtered as too many optimal parameter choices. Instances {}'.format(
         len(always_improvement_instances), always_improvement_instances), flush=True)
-    filtered_intersection = always_improvement_instances.intersection(no_improvement_instances)
-    print('{} many instances in overlap of filtering. Instances are {}'.format(
-        len(filtered_intersection), filtered_intersection), flush=True)
+    print('{} instances filtered for inconsistent amount of cuts. Instances {}'.format(
+        len(incorrect_cut_amount_instances), incorrect_cut_amount_instances), flush=True)
+    print('{} instances filtered for being root optimal. Instances {}'.format(
+        len(optimal_instances), optimal_instances), flush=True)
+    print('{} instances filtered for numeric issues. Instances {}'.format(
+        len(numerical_issues_instances), numerical_issues_instances), flush=True)
+    print('{} instances filtered for low primal dual difference. Instances {}'.format(
+        len(primal_dual_instances), primal_dual_instances), flush=True)
+
+    def instance_set_name(idx):
+        if idx == 0:
+            return 'no improvement possible'
+        elif idx == 1:
+            return 'too many optimal parameters'
+        elif idx == 2:
+            return 'root optimal'
+        elif idx == 3:
+            return 'inconsistent amount of cuts'
+        elif idx == 4:
+            return 'numerical issues'
+        elif idx == 5:
+            return 'primal dual difference'
+        else:
+            logging.warning('index out of range [0,5]: {}'.format(idx))
+            return ''
+
+    overlap = [no_improvement_instances, always_improvement_instances, optimal_instances,
+               incorrect_cut_amount_instances, numerical_issues_instances, primal_dual_instances]
+
+    for i in range(6):
+        for j in range(i + 1, 6):
+            intersection = overlap[i].intersection(overlap[j])
+            if len(intersection) > 0:
+                print('Overlap of {} and {} has {} many instances'.format(instance_set_name(i), instance_set_name(j),
+                                                                          len(intersection)), flush=True)
 
     # Dump the yml file containing all of our solve info into the right place. Use .YAML instead
-    yaml_file = os.path.join(args.data_dir, 'potential_improvements.yaml')
+    yaml_file = os.path.join(args.results_dir, 'grid_search.yaml')
     with open(yaml_file, 'w') as ss:
         yaml.dump(improvements, ss)
     print('Average Improvement: {}'.format(np.mean([improvements[i]['improvement'] for i in valid_instances])))
+    # Dump the yml file containing solve info over all parameters in the sweep (not just the best)
+    yaml_file = os.path.join(args.results_dir, 'all_grid_runs.yaml')
+    with open(yaml_file, 'w') as ss:
+        yaml.dump(full_results_dict, ss)
