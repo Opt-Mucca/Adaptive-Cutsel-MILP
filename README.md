@@ -2,11 +2,18 @@
 
 If this software was used for academic purposes, please cite our paper with the below information:
 
-`@article{turner2022adaptive,
-  title={Adaptive Cut Selection in Mixed-Integer Linear Programming},
-  author={Turner, Mark and Koch, Thorsten and Serrano, Felipe and Winkler, Michael},
-  journal={arXiv preprint arXiv:2202.10962},
-  year={2022}
+`
+@article{turner2023adaptive,
+     author = {Mark Turner and Thorsten Koch and Felipe Serrano and Michael Winkler},
+     title = {Adaptive {Cut} {Selection} in {Mixed-Integer} {Linear} {Programming}},
+     journal = {Open Journal of Mathematical Optimization},
+     eid = {5},
+     publisher = {Universit\'e de Montpellier},
+     volume = {4},
+     year = {2023},
+     doi = {10.5802/ojmo.25},
+     language = {en},
+     url = {https://ojmo.centre-mersenne.org/articles/10.5802/ojmo.25/}
 }`
 
 ## Install Guide
